@@ -1,0 +1,363 @@
+import pygame
+import sys
+import random
+import math
+
+pygame.init()
+screen = pygame.display.set_mode((1366, 600))
+pygame.display.set_caption("エアホッケー")
+clock = pygame.time.Clock()
+pygame.mixer.init()
+
+# 効果音を決める
+goal_sound = pygame.mixer.Sound("assets/melt.mp3")
+goal_sound.set_volume(0.2)
+hit_sound = pygame.mixer.Sound("assets/shot.mp3")
+boost_sound = pygame.mixer.Sound("assets/boost.mp3")
+boost_sound.set_volume(1.5)
+happy_explosion_sound = pygame.mixer.Sound("assets/explosion-312361.mp3")
+happy_explosion_sound.set_volume(0.8)
+
+# 色とフォントを決める
+WHITE = (255, 255, 255)
+BLACK = (0, 0, 0)
+ORANGE = (255, 165, 0)
+BLUE = (0, 0, 255)
+font = pygame.font.SysFont(None, 48)
+
+background_img = pygame.image.load("assets/kitaaa.png").convert()
+background_img = pygame.transform.scale(background_img, (1366, 600))
+
+GOAL_TOP = 195
+GOAL_BOTTOM = 405
+
+# カウントダウン関数の設定
+def show_countdown():
+    countdown_font = pygame.font.SysFont(None, 150)
+    for count in ["3", "2", "1", "GO!"]:
+        start_time = pygame.time.get_ticks()
+        while pygame.time.get_ticks() - start_time < 1000:
+            screen.blit(background_img, (0, 0))
+            pygame.draw.rect(screen, ORANGE, (0, GOAL_TOP, 30, GOAL_BOTTOM - GOAL_TOP))
+            pygame.draw.rect(screen, BLUE, (1336, GOAL_TOP, 30, GOAL_BOTTOM - GOAL_TOP))
+            pygame.draw.line(screen, WHITE, (683, 0), (683, 600), 2)
+
+            text_surface = countdown_font.render(count, True, WHITE)
+            screen.blit(text_surface, (
+                screen.get_width() // 2 - text_surface.get_width() // 2,
+                screen.get_height() // 2 - text_surface.get_height() // 2
+            ))
+
+            pygame.display.flip()
+            clock.tick(60)
+
+# スコア変数
+score1 = 0
+score2 = 0
+
+# その他の設定　いろいろ
+show_countdown()
+start_time = pygame.time.get_ticks()
+game_duration = 5 * 60 * 1000
+game_over = False
+sudden_death = False
+
+# 最後に触れたプレイヤーを記録
+last_touch_player = "player1"
+
+# ボールの設定
+puck_radius = 45
+puck = pygame.Vector2(683, 300)
+puck_vel = pygame.Vector2(2, 2)
+
+# ゴールの範囲の設定
+def random_velocity(speed=2):
+    angle = random.uniform(0, 360)
+    return pygame.Vector2(1, 0).rotate(angle) * speed
+
+def get_rotation_angle(v):
+    return v.angle_to(pygame.Vector2(0, -1))
+
+def circle_rect_collision(center, radius, rect):
+    closest_x = max(rect.left, min(center.x, rect.right))
+    closest_y = max(rect.top, min(center.y, rect.bottom))
+    distance = pygame.Vector2(center.x - closest_x, center.y - closest_y)
+    return distance.length_squared() < radius ** 2
+
+def goal_explosion_animation(center_x, center_y):
+    warm_colors = [
+        (255, 255, 0), (255, 223, 0), (255, 200, 0), (255, 180, 0),
+        (255, 165, 0), (255, 140, 0), (255, 120, 0), (255, 100, 0),
+        (255, 80, 0), (255, 60, 0), (255, 40, 0), (255, 20, 0),
+    ]
+    particles = []
+    for _ in range(80):
+        angle = random.uniform(0, 360)
+        speed = random.uniform(2, 6)
+        dx = math.cos(math.radians(angle)) * speed
+        dy = math.sin(math.radians(angle)) * speed
+        particles.append({
+            "x": center_x, "y": center_y, "dx": dx, "dy": dy,
+            "radius": random.randint(5, 15), "color": random.choice(warm_colors)
+        })
+
+    for _ in range(15):
+        # ★ イベント処理を追加
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                pygame.quit()
+                sys.exit()
+
+        screen.blit(background_img, (0, 0))
+        pygame.draw.rect(screen, ORANGE, (0, GOAL_TOP, 30, GOAL_BOTTOM - GOAL_TOP))
+        pygame.draw.rect(screen, BLUE, (1336, GOAL_TOP, 30, GOAL_BOTTOM - GOAL_TOP))
+        pygame.draw.line(screen, WHITE, (683, 0), (683, 600), 2)
+
+        for p in particles:
+            pygame.draw.circle(screen, p["color"], (int(p["x"]), int(p["y"])), p["radius"])
+            p["x"] += p["dx"]
+            p["y"] += p["dy"]
+            p["radius"] = max(1, p["radius"] - 1)
+
+        pygame.display.flip()
+        pygame.time.delay(50)
+
+def show_goal_text_fadein(text="GOAL!", duration=800):
+    goal_font = pygame.font.SysFont(None, 120)
+    start_time = pygame.time.get_ticks()
+
+    while True:
+        # ★ イベント処理を追加
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                pygame.quit()
+                sys.exit()
+
+        elapsed = pygame.time.get_ticks() - start_time
+        if elapsed > duration:
+            break
+
+        alpha = min(255, int(255 * (elapsed / duration)))
+
+        screen.blit(background_img, (0, 0))
+        pygame.draw.rect(screen, ORANGE, (0, GOAL_TOP, 30, GOAL_BOTTOM - GOAL_TOP))
+        pygame.draw.rect(screen, BLUE, (1336, GOAL_TOP, 30, GOAL_BOTTOM - GOAL_TOP))
+        pygame.draw.line(screen, WHITE, (683, 0), (683, 600), 2)
+
+        text_surface = goal_font.render(text, True, WHITE)
+        text_surface.set_alpha(alpha)
+        screen.blit(text_surface, (
+            screen.get_width() // 2 - text_surface.get_width() // 2,
+            screen.get_height() // 2 - text_surface.get_height() // 2
+        ))
+
+        pygame.display.flip()
+        pygame.time.delay(30)
+
+# 画像の設定
+ball_img = pygame.image.load("assets/ball.png").convert_alpha()
+ball_img = pygame.transform.scale(ball_img, (puck_radius * 2, puck_radius * 2))
+left_goal = pygame.Rect(0, 0, 30, 600)
+right_goal = pygame.Rect(1336, 0, 30, 600)
+car1_img = pygame.image.load("assets/car2.gif").convert_alpha()
+car2_img = pygame.image.load("assets/car1.gif").convert_alpha()
+car1_img = pygame.transform.scale(
+    car1_img,
+    (int(car1_img.get_width() / 12.5), int(car1_img.get_height() / 12.5))
+)
+
+car2_img = pygame.transform.scale(
+    car2_img,
+    (int(car2_img.get_width() / 12.5), int(car2_img.get_height() / 12.5))
+)
+paddle1 = car1_img.get_rect(topleft=(50, 250))
+paddle2 = car2_img.get_rect(topleft=(1220, 250))
+dir1 = pygame.Vector2(0, -1)
+dir2 = pygame.Vector2(0, -1)
+
+BOOST_TIME = 3000
+BOOST_SPEED = 15
+NORMAL_SPEED = 8
+boost_used_1 = False
+boost_used_2 = False
+boost_timer_1 = 0
+boost_timer_2 = 0
+
+HIT_COOLDOWN = 200
+last_hit_1 = 0
+last_hit_2 = 0
+while True:
+    for event in pygame.event.get():
+        if event.type == pygame.QUIT:
+            pygame.quit()
+            sys.exit()
+
+    keys = pygame.key.get_pressed()
+    current_time = pygame.time.get_ticks()
+
+    if game_over:
+        remaining = 0
+    else:
+        elapsed = current_time - start_time
+        remaining = max(0, game_duration - elapsed)
+
+    minutes = remaining // 60000
+    seconds = (remaining % 60000) // 1000
+    timer_color = (255, 0, 0) if remaining < 15000 and not game_over else WHITE
+
+    if not game_over and elapsed >= game_duration:
+        game_over = True
+        if score1 == score2:
+            sudden_death = True
+
+    # ブースト処理
+    if not game_over:
+        if keys[pygame.K_2] and not boost_used_1:
+            boost_used_1 = True
+            boost_timer_1 = current_time
+            boost_sound.play()
+        if keys[pygame.K_RETURN] and not boost_used_2:
+            boost_used_2 = True
+            boost_timer_2 = current_time
+            boost_sound.play()
+
+    boost_active_1 = boost_used_1 and current_time - boost_timer_1 < BOOST_TIME
+    boost_active_2 = boost_used_2 and current_time - boost_timer_2 < BOOST_TIME
+    speed1 = BOOST_SPEED if boost_active_1 else NORMAL_SPEED
+    speed2 = BOOST_SPEED if boost_active_2 else NORMAL_SPEED
+
+   # 操作設定
+    if not game_over:
+        move1 = pygame.Vector2(0, 0)
+        if keys[pygame.K_w] and paddle1.top > 0:
+            paddle1.y -= speed1
+            move1 += pygame.Vector2(0, -1)
+        if keys[pygame.K_s] and paddle1.bottom < 600:
+            paddle1.y += speed1
+            move1 += pygame.Vector2(0, 1)
+        if keys[pygame.K_a] and paddle1.left > 0:
+            paddle1.x -= speed1
+            move1 += pygame.Vector2(-1, 0)
+        if keys[pygame.K_d] and paddle1.right < 1366:
+            paddle1.x += speed1
+            move1 += pygame.Vector2(1, 0)
+        if move1.length_squared() > 0:
+            dir1 = move1.normalize()
+
+        move2 = pygame.Vector2(0, 0)
+        if keys[pygame.K_UP] and paddle2.top > 0:
+            paddle2.y -= speed2
+            move2 += pygame.Vector2(0, -1)
+        if keys[pygame.K_DOWN] and paddle2.bottom < 600:
+            paddle2.y += speed2
+            move2 += pygame.Vector2(0, 1)
+        if keys[pygame.K_LEFT] and paddle2.left > 0:
+            paddle2.x -= speed2
+            move2 += pygame.Vector2(-1, 0)
+        if keys[pygame.K_RIGHT] and paddle2.right < 1366:
+            paddle2.x += speed2
+            move2 += pygame.Vector2(1, 0)
+        if move2.length_squared() > 0:
+            dir2 = move2.normalize()
+
+    # パックの設定
+    if not game_over:
+        puck += puck_vel
+        if puck.y - puck_radius <= 0 or puck.y + puck_radius >= 600:
+            puck_vel.y *= -1
+    else:
+        puck_vel = pygame.Vector2(0, 0)
+    # ゴール判定
+    if puck.x + puck_radius >= right_goal.left and not game_over:
+        if GOAL_TOP < puck.y < GOAL_BOTTOM:
+            score1 += 1
+            goal_sound.stop()
+            goal_sound.play()
+            happy_explosion_sound.play()
+            goal_explosion_animation(puck.x, puck.y)
+            show_goal_text_fadein(f"{last_touch_player.upper()} GOAL!")
+            puck = pygame.Vector2(683, 300)
+            puck_vel = random_velocity()
+            boost_used_1 = boost_used_2 = boost_used_3 = boost_used_4 = False
+        else:
+            puck.x = right_goal.left - puck_radius
+            puck_vel.x *= -1
+
+    if puck.x - puck_radius <= left_goal.right and not game_over:
+        if GOAL_TOP < puck.y < GOAL_BOTTOM:
+            score2 += 1
+            goal_sound.stop()
+            goal_sound.play()
+            happy_explosion_sound.play()
+            goal_explosion_animation(puck.x, puck.y)
+            show_goal_text_fadein(f"{last_touch_player.upper()} GOAL!")
+            puck = pygame.Vector2(683, 300)
+            puck_vel = random_velocity()
+            boost_used_1 = boost_used_2 = boost_used_3 = boost_used_4 = False
+        else:
+            puck.x = left_goal.right + puck_radius
+            puck_vel.x *= -1
+
+    # 勝利条件の判定
+    if not game_over:
+        if score1 >= 10 and score1 > score2:
+            game_over = True
+        elif score2 >= 10 and score2 > score1:
+            game_over = True
+        elif sudden_death and score1 != score2:
+            game_over = True
+
+    # 衝突判定（最後に触れたプレイヤーを記録）
+    if not game_over and circle_rect_collision(puck, puck_radius, paddle1):
+        puck_vel.x = -abs(puck_vel.x) * 1.1 if puck.x < paddle1.centerx else abs(puck_vel.x) * 1.1
+        last_touch_player = "player1"
+        if current_time - last_hit_1 > HIT_COOLDOWN:
+            hit_sound.play()
+            last_hit_1 = current_time
+
+    if not game_over and circle_rect_collision(puck, puck_radius, paddle2):
+        puck_vel.x = -abs(puck_vel.x) * 1.1 if puck.x < paddle2.centerx else abs(puck_vel.x) * 1.1
+        last_touch_player = "player2"
+        if current_time - last_hit_2 > HIT_COOLDOWN:
+            hit_sound.play()
+            last_hit_2 = current_time
+
+    # 画面描画の設定
+    screen.blit(background_img, (0, 0))
+    pygame.draw.rect(screen, ORANGE, (0, GOAL_TOP, 30, GOAL_BOTTOM - GOAL_TOP))
+    pygame.draw.rect(screen, BLUE, (1336, GOAL_TOP, 30, GOAL_BOTTOM - GOAL_TOP))
+    pygame.draw.line(screen, WHITE, (683, 0), (683, 600), 2)
+
+    rot1 = pygame.transform.rotate(car1_img, get_rotation_angle(dir1))
+    screen.blit(rot1, rot1.get_rect(center=paddle1.center))
+    rot2 = pygame.transform.rotate(car2_img, get_rotation_angle(dir2))
+    screen.blit(rot2, rot2.get_rect(center=paddle2.center))
+    screen.blit(ball_img, ball_img.get_rect(center=(int(puck.x), int(puck.y))))
+
+    # スコアの表示
+    screen.blit(font.render(f"Team Orange: {score1}", True, WHITE), (50, 20))
+    screen.blit(font.render(f"Team Blue: {score2}", True, WHITE), (1100, 20))
+
+    # ブースト状態の表示
+    rocket1 = font.render("o" if not boost_used_1 else "x", True, ORANGE)
+    rocket2 = font.render("o" if not boost_used_2 else "x", True, BLUE)
+    screen.blit(rocket1, (50, 100))
+    screen.blit(rocket2, (1260, 100))
+
+    # タイマーの表示
+    time_text = font.render(f"{minutes:02d}:{seconds:02d}", True, timer_color)
+    screen.blit(time_text, ((screen.get_width() - time_text.get_width()) // 2, 20))
+
+    # 結果を表示する
+    if game_over:
+        result = "Draw" if score1 == score2 else ("Team Orange Wins!" if score1 > score2 else "Team Blue Wins!")
+        if sudden_death and score1 == score2:
+            result = "Draw!"
+        result_surface = font.render(result, True, WHITE)
+        screen.blit(result_surface, (
+            screen.get_width() // 2 - result_surface.get_width() // 2,
+            screen.get_height() // 2 - result_surface.get_height() // 2
+        ))
+
+    pygame.display.flip()
+    clock.tick(60)
